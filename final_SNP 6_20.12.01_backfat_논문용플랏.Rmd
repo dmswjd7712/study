@@ -1,0 +1,534 @@
+---
+title: "등지방 1 mm가 한우 경락단가 및 도체가격에 미치는 경제적 가치(final_plot)"
+output: html_document
+author: "Jay"
+date: "`r format(Sys.Date())`"
+---
+
+# data preparation (farm2_SNP)
+```{r setup, message=FALSE, warning=FALSE, echo=TRUE}
+load("/Users/eunjeongjeon/Documents/r_studi/farm.rda") 
+
+library(pacman)
+pacman::p_load("tidyverse", "dplyr", "ppcor", "ggplot2",
+               "scales", "cowplot", "psych", "RColorBrewer")
+
+#1 final.grade2 <-yield index (YI2), marbling score (grade4), auction price (A.price2)
+df21<- farm2 %>% 
+  dplyr::select(id, CWT, EMA, BFT, MSC, month, farm_code, slaughter_date, legion)%>%
+  mutate(sl.year = lubridate::year(slaughter_date)) %>%filter(CWT>200 & EMA>20 & BFT>2 & BFT<=30)%>%
+
+## yield index (YI1_old, YI2_new)
+  mutate(YI2= ((11.06398 - 1.25149*BFT + 0.28293*EMA + 0.56781*CWT)/CWT)*100) %>%
+  mutate(grade2 = ifelse(YI2>=62.52, "A", ifelse(60.40<YI2, "C", "B"))) %>%
+  
+## marbling score (grade3_old, grade4_new)  
+  mutate(grade4 = ifelse(MSC %in% c(1), "3", ifelse(MSC %in% c(2,3), "2", ifelse(MSC %in% c(4,5), "1", ifelse(MSC %in% c(6), "1+", ifelse(MSC %in% c(7,8,9), "1++", "")))))) %>%
+  mutate(final.grade2 = paste0(grade2,grade4)) %>%
+  
+## auction price (A.price2_the mean value in 2019)  
+  mutate(A.price2 = ifelse(final.grade2=="A1++", 22465, ifelse(final.grade2 =="B1++", 21347, ifelse(final.grade2 =="C1++", 19990, ifelse(final.grade2 =="A1+", 20829, ifelse(final.grade2 =="B1+", 20096, ifelse(final.grade2 =="C1+", 18833, ifelse(final.grade2 =="A1", 18998, ifelse(final.grade2 =="B1", 18395, ifelse(final.grade2=="C1", 17236, ifelse(final.grade2 =="A2", 16000,ifelse(final.grade2=="B2", 15387, ifelse(final.grade2 =="C2", 14249,ifelse(final.grade2=="A3", 13093, ifelse(final.grade2 =="B3", 11566,ifelse(final.grade2=="C3", 10219, ""))))))))))))))))
+  
+## A.price2 (character->integer)
+df21$A.price2<- as.integer(df21$A.price2)
+
+#2 classification (carcass weight & backfat thickness)
+
+## carcass weight (group)
+df21<- df21 %>%
+  mutate(C.price2= A.price2*CWT/1000) %>%
+  mutate(group= ifelse(CWT>=250 & CWT<300, 'CW250-300',
+                       ifelse(CWT>=300 & CWT<350, "CW300-350",
+                                                 ifelse(CWT>=350 & CWT<400, 'CW350-400',
+                                                        ifelse(CWT>=400 & CWT<450, 'CW400-450', 
+                                                               ifelse(CWT>=450 & CWT<500, 'CW450-500', 
+                                                                      ifelse(CWT>=500 & CWT<550, 'CW500-550', 
+                                                                             ifelse(CWT>=550 & CWT<600, 'CW550-600',
+                                                                                    ifelse(CWT>=600 & CWT<650, 'CW600-650','')))))))))%>%
+  filter(group != "")
+
+
+# backfat thickness (group2)
+df21<- df21 %>%
+  mutate(group2= ifelse(BFT<5,'BFT5',
+                       ifelse(BFT>=5 & BFT<10,'BFT5-10',
+                              ifelse(BFT>=10 &BFT<21,'BFT10-20',
+                                     ifelse(BFT>=20 &BFT<30,'BFT20-30',
+                                            ifelse(BFT>=30,'BFT30','')))))) %>%
+  filter(group2 != "")
+
+
+# group3
+df21<-df21%>%mutate(group3=ifelse(CWT>=200 & CWT<300, 275,
+                              ifelse(CWT>=300 & CWT<350, 325,
+                                     ifelse(CWT>=350 & CWT<400, 375,
+                                            ifelse(CWT>=400 & CWT<450, 425, 
+                                                   ifelse(CWT>=450 & CWT<500, 475, 
+                                                          ifelse(CWT>=500 & CWT<550, 525, 
+                                                                 ifelse(CWT>=550 & CWT<600, 575, 
+                                                                        ifelse(CWT>=600 & CWT<700, 625, '')))))))))
+group3 <- levels(df21$group3)
+df21$group3 <- as.numeric(df21$group3)
+
+# group4
+df21<-df21%>%mutate(group4= ifelse(BFT<5, 4, ifelse(BFT>=5 & BFT<10, 7.5,
+                       ifelse(BFT>=10 & BFT<15, 12.5,
+                              ifelse(BFT>=15 & BFT<20, 17.5,
+                                     ifelse(BFT>=20 & BFT<25, 22.5,
+                                            ifelse(BFT>=25 & BFT<=30, 27.5, '')))))))
+
+group4 <- levels(df21$group4) 
+df21$group4 <- as.numeric(df21$group4)
+
+# factor
+df21$group<-factor(df21$group, levels = c("CW250-300", "CW300-350", "CW350-400", "CW400-450", "CW450-500","CW500-550", "CW550-600", "CW600-650"))
+df21$group2<-factor(df21$group2, levels = c("BFT5","BFT5-10","BFT10-20","BFT20-30","BFT30"))
+df21$grade2<-factor(df21$grade2, levels = c("A", "B", "C"))
+df21$grade4<-factor(df21$grade4, levels = c("1++", "1+", "1", "2"))
+
+save(df21, file ="df21(SNP)_201201.rda") #final
+```
+
+# table 1.statistical value
+```{r}
+load("df21(SNP)_201201.rda")
+summary(df21)
+rbind(cw = describe(df21$CWT),
+      loin = describe(df21$EMA),
+      backfat = describe(df21$BFT),
+      yield.index = describe(df21$YI2),
+      mabling = describe(df21$MSC),
+      c.price = describe(df21$C.price2), digits=2)-> result
+#write.csv(result, file = "table1.statistical value_df21.csv")
+```
+
+# fig 1.boxplot(4), barplot(2)
+```{r}
+# box plot(+ mean 값 annotation)
+fun_mean <- function(x){return(data.frame(y=mean(x),
+                                          label=round(mean(x,na.rm=T), digit = 2)))}
+
+theme(axis.title.x = element_text(size = 20),
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 10),
+      axis.text.y = element_text(size = 10))->jay_theme_fig1
+
+## BFT
+df21%>%group_by(group3)%>%
+  ggplot(aes(x = group3, y= BFT, group =group3))+
+  geom_boxplot(fill= "grey",alpha =0.5)+
+  xlab('Carcass weight, kg')+
+  ylab('Backfat thickness, mm')+
+  stat_summary(fun = mean, geom="point",colour="black", size=3)+
+  stat_summary(fun.data = fun_mean, geom="text", vjust=-0.7)+
+  theme_minimal()+
+  jay_theme_fig1+
+  theme(axis.title.x = element_blank())->a1
+
+## EMA
+df21%>%group_by(group3)%>%
+  ggplot(aes(x = group3, y= EMA, group =group3))+
+  geom_boxplot(fill= "grey",alpha =0.5)+
+  xlab('Carcass weight, kg')+
+  ylab(bquote(.("Loin area, ")*cm^2))+ #윗첨자^2, 아래첨자[2]
+  stat_summary(fun = mean, geom="point",colour="black", size=3) +
+  stat_summary(fun.data = fun_mean, geom="text", vjust=-0.6)+
+  theme_minimal()+
+  jay_theme_fig1 +
+  theme(axis.title.x = element_blank())->a2
+
+## yield index
+df21%>%group_by(group3)%>%
+  ggplot(aes(x = group3, y= YI2, group =group3))+
+  geom_boxplot(fill= "grey",alpha =0.5)+
+  xlab('Carcass weight, kg')+
+  ylab('Yield index')+
+  stat_summary(fun = mean, geom="point",colour="black", size=3) +
+  stat_summary(fun.data = fun_mean, geom="text", size=4,vjust=-0.6)+
+  theme_minimal()+
+  jay_theme_fig1->a3
+
+## MSC
+df21%>%group_by(group3)%>%
+  ggplot(aes(x = group3, y= MSC, group =group3))+
+  geom_boxplot(fill= "grey",alpha =0.5)+
+  xlab('Carcass weight, kg')+
+  ylab('Marbling score')+
+  stat_summary(fun = mean, geom="point",colour="black", size=3) +
+  stat_summary(fun.data = fun_mean, geom="text", vjust=-0.73)+
+  theme_minimal()+
+  jay_theme_fig1->a4
+
+
+# barplot
+
+theme(strip.text = element_text(size = 12),
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      strip.background = element_blank(),
+      axis.title.y = element_text(size=20),
+      legend.title = element_text(size=15),
+      legend.position = "bottom")->jay_theme_fig1.2
+
+## carcass quantity grade ~ carcass weight group
+df21%>%group_by(group, grade2)%>%
+  summarise(total = n())%>%
+  mutate(p = total/sum(total)*100)%>%
+  ggplot(aes(x=0, y=p, fill = grade2))+
+  geom_bar(stat = "identity", alpha = 0.6)+ 
+  facet_wrap(~group, nrow = 1)+
+  geom_text(aes(label = paste0(grade2, " (", round(p, digits = 0), "%", ")")), 
+            position = position_stack(vjust = 0.5), size =4)+
+  xlab("")+ylab("Yield grade percentage, %")+
+  labs(fill = "Carcass yield grade")+
+  scale_fill_grey(start=0.2, end=0.8)+
+  jay_theme_fig1.2->a5
+
+
+## carcass quality grade ~ carcass weight group
+df21%>%group_by(group, grade4)%>%
+  summarise(total = n())%>%
+  mutate(p = total/sum(total)*100)%>%
+  ggplot(aes(x=0, y=p, fill = grade4))+
+  geom_bar(stat = "identity", alpha = 0.6)+
+  facet_wrap(~group, nrow = 1)+
+  geom_text(aes(label = paste0(grade4, " (", round(p, digits = 0), "%", ")")),
+            position = position_stack(vjust = 0.5), size =4)+
+  xlab("")+ylab("Quality grade percentage, %")+
+  labs(fill = "Carcass quality grade")+
+  scale_fill_grey(start=0.2, end=0.8)+
+  jay_theme_fig1.2->a6
+
+plot_grid(a1,a2,a3,a4,a5,a6, ncol = 2, align = 'v')->fig1
+fig1
+
+#p + scale_fill_brewer(palette = "Greys")
+#ggsave(fig1, file = "fig1.png", width = 18.0, height = 19.0, dpi =300)
+```
+
+
+## fig 2. scatter plot 1 + 2
+```{r}
+
+## backfat~ carcass weight (+ color, size)
+df21%>%ggplot(aes(CWT, BFT, color = grade2, size = grade4))+
+  geom_point(position ="jitter", alpha= 0.5)+
+  xlim(270, 650)+ylim(2, 30)+
+  labs(color = "Carcass yield grade",
+       size = "Carcass quality grade")+
+  ylab("Backfat thickness, mm")+
+  theme_minimal()+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 18),
+        axis.text.x = element_text(size =12),
+        axis.text.y = element_text(size = 12),
+        strip.text = element_text(size = 12, face = "bold"),
+        plot.background = element_rect(color = "white"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        legend.position = "top")+
+  scale_color_grey(start=0.2, end=0.8)->b1
+
+
+### backfat~ carcass weight (+ color, facet_wrap)
+df21%>%ggplot(aes(CWT, BFT, color = grade2))+
+  geom_point(position ="jitter", alpha= 0.5)+
+  xlim(270, 650)+ylim(2, 30)+
+  facet_wrap(~grade2)+
+  theme_minimal()+
+  xlab("Carcass weight, kg")+ylab("Backfat thickness, mm")+
+  theme(axis.title.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        strip.text = element_text(size = 18),
+        legend.position = "none",
+        axis.line = element_line(size = 0.3, color = "grey"),
+        plot.background = element_rect(color = "white"))+
+  scale_color_grey(start=0.2, end=0.8)->b2
+
+plot_grid(b1, b2, ncol = 1, align = 'v')->fig2
+#ggsave(fig2, file = "fig2.png", width = 12, height = 12.5, dpi =300)
+
+fig2
+
+```
+
+
+# partial regression coefficient (carcass price)
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+## C.price2~ CWT + EMA + BFT + MSC
+ 
+# pcor(df21%>%filter(group=='CW250-300')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW300-350')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW350-400')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW400-450')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW450-500')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW500-550')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW550-600')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+# pcor(df21%>%filter(group=='CW600-650')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))
+
+
+# C.price2$statistic
+
+# total (C.price_new1)
+cbind(CW250_300= pcor(df21%>%filter(group=='CW250-300')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW300_350= pcor(df21%>%filter(group=='CW300-350')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW350_400= pcor(df21%>%filter(group=='CW350-400')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW400_450= pcor(df21%>%filter(group=='CW400-450')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW450_500= pcor(df21%>%filter(group=='CW450-500')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5], 
+      CW500_550= pcor(df21%>%filter(group=='CW500-550')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5], 
+      CW550_600= pcor(df21%>%filter(group=='CW550-600')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5], 
+      CW600_650= pcor(df21%>%filter(group=='CW600-650')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5])->C.price_new1
+
+C.price_new1<-t(C.price_new1)
+
+write.csv(C.price_new1, file = "C.price_new1.csv")
+C.price_new1<-read.csv("C.price_new1.csv", header = T, stringsAsFactors = F)
+
+C.price_new1%>%dplyr::select(-"C.price2")%>%
+  mutate(cw = c(275, 325, 375, 425, 475, 525, 575, 625),
+         cw2 = c(255, 305, 355, 405, 455, 505, 555, 605),
+         CWT2 = CWT*1000, EMA2= EMA*1000, BFT2= BFT*1000, MSC2 = MSC*1000,
+         sl.month = "total")->C.price_new1
+
+
+# C.price2$statistic
+# sl.month 별 분류 
+table(df21$month)
+df21<-df21%>%mutate(sl.month=ifelse(month>=26 & month<29, "short",
+                              ifelse(month>=29 & month<32, "medium",
+                                     ifelse(month>=32 & month<35, "long",""))))%>%
+  filter(sl.month != "")
+
+sl.period<-"long"
+
+#short
+cbind(CW250_300= pcor(df21%>%filter(sl.month== sl.period & group=='CW250-300')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW300_350= pcor(df21%>%filter(sl.month== sl.period & group=='CW300-350')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW350_400= pcor(df21%>%filter(sl.month== sl.period & group=='CW350-400')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW400_450= pcor(df21%>%filter(sl.month== sl.period & group=='CW400-450')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW450_500= pcor(df21%>%filter(sl.month== sl.period & group=='CW450-500')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW500_550= pcor(df21%>%filter(sl.month== sl.period & group=='CW500-550')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW550_600= pcor(df21%>%filter(sl.month== sl.period & group=='CW550-600')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5])->result
+
+# medium, long
+cbind(CW250_300= pcor(df21%>%filter(sl.month== sl.period & group=='CW250-300')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW300_350= pcor(df21%>%filter(sl.month== sl.period & group=='CW300-350')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW350_400= pcor(df21%>%filter(sl.month== sl.period & group=='CW350-400')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW400_450= pcor(df21%>%filter(sl.month== sl.period & group=='CW400-450')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW450_500= pcor(df21%>%filter(sl.month== sl.period & group=='CW450-500')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW500_550= pcor(df21%>%filter(sl.month== sl.period & group=='CW500-550')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW550_600= pcor(df21%>%filter(sl.month== sl.period & group=='CW550-600')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5],
+      CW600_650= pcor(df21%>%filter(sl.month== sl.period & group=='CW600-650')%>%dplyr::select(CWT, EMA, BFT, MSC, C.price2))$statistic[,5])->result
+
+result<-t(result)
+result
+
+write.csv(result, file = "C.price_result.csv")
+C.price_result<-read.csv("C.price_result.csv", header = T, stringsAsFactors = F)
+
+C.price_result%>%dplyr::select(-"C.price2")%>%
+  mutate(cw = c(275, 325, 375, 425, 475, 525, 575),
+         cw2 = c(255, 305, 355, 405, 455, 505, 555),
+         CWT2 = CWT*1000, EMA2= EMA*1000, BFT2= BFT*1000, MSC2 = MSC*1000,
+         sl.month = "short")->C.price_short
+
+C.price_result%>%dplyr::select(-"C.price2")%>%
+  mutate(cw = c(275, 325, 375, 425, 475, 525, 575, 625),
+         cw2 = c(255, 305, 355, 405, 455, 505, 555, 605),
+         CWT2 = CWT*1000, EMA2= EMA*1000, BFT2= BFT*1000, MSC2 = MSC*1000,
+         sl.month = "long")->C.price_long
+
+rbind(C.price_short, C.price_medium, C.price_long, C.price_new1)-> result
+
+# write.csv(result, file = "C.price_result.csv") 
+C.price_result<-read.csv("C.price_result.csv", header = T, stringsAsFactors = F) #분석파일(barplot: total, short, medium, long)
+
+```
+
+
+## fig 3.lineplot + bar + line2
+```{r}
+
+# 기본(육량등급출현율) 
+
+# backfat thickness
+C.price_result%>%
+  filter(sl.month =="total")%>%
+  mutate(test = ifelse(BFT2 < 0, 'T', "F"))%>%
+  group_by(BFT2, cw, test)%>%
+  ggplot(aes(cw, BFT2, fill=test))+ # fill = test (value(+), (-))
+  geom_bar(stat = "identity", alpha=0.67)+  
+  scale_fill_manual(values = c("dark grey", "black"))+ # scale_fill_manual = test (+): blue, (-): red
+  ylab('Economic effect of backfat thickness, won/head')+
+  labs(title = "(B)")+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 15),
+        legend.position = "none",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        panel.background = element_blank())+
+  geom_text(aes(label = format(round(BFT2, digits = 0)), big.mark = ",",
+                scientific = FALSE), position=position_stack(0.5), size =5)+
+  coord_cartesian(xlim = c(270, 630))->c2
+
+
+# coord_cartesian(expand = FALSE) 여백없음
+# coord_cartesian(xlim = c(265, 630))
+# scale_x_continuous(limits = c(60, 80))
+
+df21%>%
+  group_by(group3, grade2)%>%
+  summarise(total = n(), mean = mean(group4), sd= sd(group4))%>%
+  mutate(p = total/sum(total)*100)%>%
+  mutate(cv = sd/mean*100)%>%
+  mutate(cv2 = ifelse(cv <17, "A", 
+                      ifelse (cv <=25, "B",
+                              ifelse(cv <=30, "C", "D"))))%>%
+  ggplot(aes(x=group3, y=p, color = grade2, size = cv2))+
+  geom_point(alpha = 0.6)+geom_line(lwd=0.5, alpha = 0.6)+
+  scale_size_manual(values = c(3, 5, 12, 14))+
+  theme_minimal()+
+  ylab("Carcass yield grade, %")+
+  labs(title = "(A)",
+       size = "CV",
+       color = "Carcass yield grade")+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 16),
+        strip.text = element_text(size = 15, face = "bold"),
+        plot.background = element_rect(color = "white"),
+        plot.title = element_text(size = 20, vjust = -13, face = "bold"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        legend.position = "top",
+        legend.direction = 'horizontal',
+        legend.box.just = 'center',
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15))+
+  scale_color_grey(start=0.2, end=0.8)->c1
+
+
+df21%>%
+  group_by(group3, grade4)%>%
+  summarise(total = n(), mean = mean(group4), sd= sd(group4))%>%
+  mutate(p = total/sum(total)*100)%>%
+  mutate(cv = sd/mean*100)%>%
+  na.omit(df21)%>%
+  mutate(cv2 = ifelse(cv < 20, "A", 
+                      ifelse (cv <30, "B",
+                              ifelse(cv <=35, "C", "D"))))%>%
+  ggplot(aes(x=group3, y=p, color = grade4, size = cv2))+
+  geom_point(alpha = 0.6)+geom_line(lwd=0.5, alpha = 0.6)+
+  scale_size_manual(values = c(3, 5, 10, 14))+
+  theme_minimal()+
+  xlab("Carcass weight, kg")+
+  ylab("Carcass quality grade, %")+
+  labs(title = "(C)",
+       size = "CV",
+       color = "Carcass quality grade")+
+  theme(axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        strip.text = element_text(size = 15, face = "bold"),
+        plot.background = element_rect(color = "white"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        legend.position = "bottom",
+        legend.direction = 'horizontal',
+        legend.box.just = 'center',
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        plot.title = element_text(size = 20, face = "bold"))+
+  scale_color_grey(start=0.2, end=0.8)->c3
+
+
+#p + scale_color_grey(start=0.2, end=0.8)
+#p + scale_fill_brewer(palette = "Greys")
+
+# ggsave(plot_grid(c1, c2, c3, ncol = 1, align = "v"), file = "fig3.png", width = 11, height = 15.0, dpi =300)
+
+```
+
+# figure4. effect of sl.month(barplot 1,2,3)
+```{r}
+
+# short
+C.price_result%>%
+  filter(sl.month =="short")%>%
+  mutate(test = ifelse(BFT2 < 0, 'T', "F"))%>%
+  group_by(BFT2, cw, test)%>%
+  ggplot(aes(cw, BFT2, fill=test))+ # fill = test (value(+), (-))
+  geom_bar(stat = "identity", alpha=0.67)+
+  scale_fill_manual(values = c("dark grey", "black"))+ # scale_fill_manual = test (+): blue, (-): red
+  ylab('Economic effect of backfat thickness, won/head')+
+  labs(title = "(A) Slaughter months: 26-28 mo.")+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 15),
+        legend.position = "none",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        panel.background = element_blank())+
+  geom_text(aes(label = format(round(BFT2, digits = 0)), big.mark = ",",
+                scientific = FALSE), position=position_stack(0.5), size =5)+
+  coord_cartesian(xlim = c(270, 630))->m1
+
+  
+# medium
+C.price_result%>%
+  filter(sl.month =="medium")%>%
+  mutate(test = ifelse(BFT2 < 0, 'T', "F"))%>%
+  group_by(BFT2, cw, test)%>%
+  ggplot(aes(cw, BFT2, fill=test))+ # fill = test (value(+), (-))
+  geom_bar(stat = "identity", alpha=0.67)+
+  scale_fill_manual(values = c("dark grey", "black"))+ # scale_fill_manual = test (+): blue, (-): red
+  ylab('Economic effect of backfat thickness, won/head')+
+  labs(title = "(B) Slaughter months: 29-31 mo.")+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 16),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 15),
+        legend.position = "none",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        panel.background = element_blank())+
+  geom_text(aes(label = format(round(BFT2, digits = 0)), big.mark = ",",
+                scientific = FALSE), position=position_stack(0.5), size =5)+
+  coord_cartesian(xlim = c(270, 630))->m2
+
+# long
+C.price_result%>%
+  filter(sl.month =="long")%>%
+  mutate(test = ifelse(BFT2 < 0, 'T', "F"))%>%
+  group_by(BFT2, cw, test)%>%
+  ggplot(aes(cw, BFT2, fill=test))+ # fill = test (value(+), (-))
+  geom_bar(stat = "identity", alpha=0.67)+
+  scale_fill_manual(values = c("dark grey", "black"))+ # scale_fill_manual = test (+): blue, (-): red
+  ylab('Economic effect of backfat thickness, won/head')+
+  xlab('Carcass weight, kg')+
+  labs(title = "(C) Slaughter months: 32-34 mo.")+
+  theme(axis.title.x = element_text(size = 16),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 15),
+        legend.position = "none",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.line = element_line(size = 0.3, color = "grey"),
+        panel.background = element_blank())+
+  geom_text(aes(label = format(round(BFT2, digits = 0)), big.mark = ",",
+                scientific = FALSE), position=position_stack(0.5), size =5)+
+  coord_cartesian(xlim = c(270, 630))->m3
+
+
+# ggsave(plot_grid(m1, m2, m3, ncol = 1, align = "v"), file = "fig4.png", width = 11, height = 15.0, dpi =300)
+
+#cowplot::plot_grid(p1, p2, p3, p4, ncol = 2) # labels ="auto" or c("A", "B", "C", "D")
+```
+
